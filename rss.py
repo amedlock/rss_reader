@@ -106,7 +106,7 @@ class FeedDB(object):
     "rss_log":"CREATE TABLE rss_log(id integer primary key asc, feed_id, tstamp, status, text);"
   }
   def __init__(self, fname="feed.db"):
-    self.con = sqlite3.connect(dname)
+    self.con = sqlite3.connect(fname)
     self.setup_db()
 
   def table_missing( self, cur, table_name ):
@@ -132,7 +132,7 @@ class FeedDB(object):
     for (id, name, url, desc, show_unread, last_updated, etag) in self.con.execute(sql):
       f = Feed(name, url, desc=desc, last_updated=last_updated, etag=etag, id=id, show_unread=show_unread)
       result.add_feed( f )
-      self.load_feed_items( con, f )
+      self.load_feed_items( f )
     return result
 
   def save_feed_item( self, feed, item ):
@@ -147,7 +147,7 @@ class FeedDB(object):
     else:
       val = "true" if item.read else "false"
       cur.execute("update rss_item set read=? where id = ?", (val , item.id))
-    con.commit()
+    self.con.commit()
 
   def save_feed( self, feed ):
       """ Save a Feed to the database, or update if any items changed """
@@ -232,6 +232,7 @@ def load_feed(feed):
       if etag:
         feed.etag = etag
       parse_rss( result, feed )
+      print("Loaded rss items from {0}".format( feed.name ))
   except HTTPError as he:
     if he.code==304:  
       feed.add_log("No New items found")
@@ -280,7 +281,7 @@ if __name__ == "__main__":
     
   if cmd=='refresh':
     for f in feed_config.feeds:
-      fdb.load_feed(f)
+      load_feed(f)
       for it in f.logs: 
         print("{0}:{1}".format( f.name, it) )
       fdb.save_feed(f)

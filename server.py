@@ -11,19 +11,23 @@ from rss import *
 import string
 import json
 
-if not exists("feed.db") and isfile("feed.db"):
-  print("RSS database not found!  Aborting.")
-  sys.exit(-1)
 
-db = sqlite3.connect("feed.db")
+rss_view = None
 
-feed_config = load_feed_config( db )
+
+class RSSView(object):
+  def __init__(self, fname="feed.db"):
+    self.fdb = FeedDB(fname)
+    self.feed_config = self.fdb.load_feed_config()
+    self.html_template = None
+    with open("template.html", 'r') as t:
+      self.html_template = Template( t.read() )
+
+
 
 class Template(string.Template):
   delimiter="@@"
 
-with open("template.html", 'r') as t:
-  html_template = Template( t.read() )
 
 def show_feeds( cfg, dest, type="Unread" ):
   dest.write("<tbody>")
@@ -53,8 +57,8 @@ def to_json_item( feed_id, fi ):
   return { "id":fi.id, "feed_id":feed_id, "title":fi.title, "link":fi.link, "read":fi.read }
   
 
-class RSSHandler(BaseHTTPRequestHandler):
 
+class RSSHandler(BaseHTTPRequestHandler):
   def parse_path(self):
     path = urlparse( self.path ).path
     result = [x.strip("/") for x in path.split("/")]
@@ -69,7 +73,7 @@ class RSSHandler(BaseHTTPRequestHandler):
       self.send_response(200)
       self.send_header("Content-type", "text/json; charset=utf-8")
       self.end_headers()
-      self.wfile.write( to_json( feed_config ).encode("utf-8") )
+      self.wfile.write( to_json( rss_view.feed_config ).encode("utf-8") )
       return
     if path==["items"]:
       self.send_response(200)      
@@ -80,7 +84,7 @@ class RSSHandler(BaseHTTPRequestHandler):
       fid = 0
       if args.get("id"):
         fid = int( args['id'][0] )
-      for f in feed_config.feeds:
+      for f in rss_view.feed_config.feeds:
         if f.id==fid:
           result = f.items
       self.wfile.write( json.dumps( [ to_json_item(fid,it) for it in result] ).encode("utf-8") )
@@ -89,7 +93,7 @@ class RSSHandler(BaseHTTPRequestHandler):
     self.send_response(200)
     self.send_header("Content-type", "text/html; charset=utf-8")
     self.end_headers()
-    html = html_template.substitute( { "serverUrl":'http://localhost:8000' } )
+    html = rss_view.html_template.substitute( { "serverUrl":'http://localhost:8000' } )
     self.wfile.write( html.encode("utf-8") )
 
   def parse_form(self):
@@ -103,7 +107,7 @@ class RSSHandler(BaseHTTPRequestHandler):
     if path==["mark"]:
       id = int( args.get("id", "0"))
       val = args.get("read", "false")=="true"
-      feed_config.mark( id, val )
+      rss_view.feed_config.mark( id, val )
       self.send_response(200);
       self.send_header("Content-type", "text/html; charset=utf-8")
       self.end_headers()
@@ -120,7 +124,7 @@ class RSSHandler(BaseHTTPRequestHandler):
     self.send_header("Content-type", "text/html; charset=utf-8")
     self.end_headers()
     result = StringIO()
-    show_feeds( feed_config, result, t )
+    show_feeds( rss_view.feed_config, result, t )
     self.wfile.write( result.getvalue().encode("utf-8") )
 
   def get_jquery(self):
@@ -131,18 +135,24 @@ class RSSHandler(BaseHTTPRequestHandler):
       self.wfile.write( jq.read().encode('utf-8'))
 
 
-Timer(2.0, lambda: webbrowser.open( "http://localhost:8000") ).start()
+if __name__ == "__main__":
+  if not exists("feed.db") and isfile("feed.db"):
+    print("RSS database not found!  Aborting.")
+    sys.exit(-1)
 
-try:
-  server_address = ('', 8000)
-  httpd = HTTPServer( server_address, RSSHandler )
-  print("RSS Server started on port: {0}".format( server_address[1] ))
-  httpd.serve_forever()
-except KeyboardInterrupt:
-  pass
+  rss_view = RSSView("feed.db")
 
-httpd.server_close()
-print("RSS Server stopped")
+  Timer(2.0, lambda: webbrowser.open( "http://localhost:8000") ).start()
+  try:
+    server_address = ('', 8000)
+    httpd = HTTPServer( server_address, RSSHandler )
+    print("RSS Server started on port: {0}".format( server_address[1] ))
+    httpd.serve_forever()
+  except KeyboardInterrupt:
+    pass
+
+  httpd.server_close()
+  print("RSS Server stopped")
 
 
 
