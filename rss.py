@@ -97,10 +97,90 @@ class Feed(object):
     self.logs.append( txt )
 
 
+# Sqlite database interface
+class FeedDB(object):
+  tables = {
+    "rss_feed":"create table rss_feed(id integer primary key asc, name, url, desc, show_unread, last_updated, etag);", 
+    "rss_xml":"create table rss_xml(feed_id integer, xml, tstamp);" ,
+    "rss_item": "create table rss_item(id integer primary key asc, feed_id, title, link, desc, read );",
+    "rss_log":"CREATE TABLE rss_log(id integer primary key asc, feed_id, tstamp, status, text);"
+  }
+  def __init__(self, fname="feed.db"):
+    self.con = sqlite3.connect(dname)
+    self.setup_db()
+
+  def table_missing( self, cur, table_name ):
+    cur.execute("select * from sqlite_master where type=? and name=?", ( 'table', table_name))
+    return cur.fetchone() == None
+
+  def setup_db(self):
+    cur = self.con.cursor()
+    missing = [ddl for (table,ddl) in self.tables.items() if self.table_missing(cur, table)]
+    for ddl in missing:
+      cur.execute(ddl)
+    self.con.commit()
+
+  def load_feed_items(self, feed):
+    sql = "select id, title, link, desc, read from rss_item where feed_id = ?"
+    for (id, title, link, desc, is_read) in self.con.execute( sql , (feed.id,) ):
+      fi = FeedItem( title, link,desc, id, is_read )
+      feed.add_item( fi )
+
+  def load_feed_config(self):
+    result = FeedConfig()
+    sql = "select id, name, url, desc, show_unread, last_updated, etag from rss_feed"
+    for (id, name, url, desc, show_unread, last_updated, etag) in self.con.execute(sql):
+      f = Feed(name, url, desc=desc, last_updated=last_updated, etag=etag, id=id, show_unread=show_unread)
+      result.add_feed( f )
+      self.load_feed_items( con, f )
+    return result
+
+  def save_feed_item( self, feed, item ):
+    """ Feed Items don't change, so just insert if necessary """
+    cur = self.con.cursor()
+    if not item.id:
+      title = item.title if item.title else "None"
+      link = item.link if item.link else "#"
+      desc = item.desc or title 
+      cur.execute("insert into rss_item(feed_id, title, link, desc) values (?, ?, ?, ? );", (feed.id, title, link, desc ))
+      item.id = cur.lastrowid
+    else:
+      val = "true" if item.read else "false"
+      cur.execute("update rss_item set read=? where id = ?", (val , item.id))
+    con.commit()
+
+  def save_feed( self, feed ):
+      """ Save a Feed to the database, or update if any items changed """
+      now = datetime.now()
+      tstamp = now.strftime("%Y-%m-%d %H:%M:%S %Z")
+      cur = self.con.cursor()
+      if feed.id:
+        cur.execute("update rss_feed set last_updated=?, etag=? where id=?", (feed.last_updated, feed.etag, feed.id))
+      else:
+        cur.execute("insert into rss_feed(name, url, desc, last_updated, etag) values(?, ?, ?, ?, ?)",
+          (feed.name, feed.url, feed.desc, str(feed.last_updated), feed.etag ) )
+        feed.id = cur.lastrowid  
+      self.con.commit()
+      for it in feed.items:
+        self.save_feed_item( feed, it )
+      for it in feed.logs:
+        cur.execute("insert into rss_log( feed_id, status, text, tstamp) values( ?, 'INFO', ?, ?)", (feed.id, it, tstamp))
+      feed.logs= []
+      if feed.xml:
+        cur.execute("insert into rss_xml( feed_id, xml, tstamp) values (?,?,?)", (feed.id, feed.xml, tstamp))
+        feed.xml = None
+      self.con.commit()
+
+  def save_feed_config( self,feed_config ):
+    for feed in feed_config.feeds:
+      self.save_feed( feed )
+
+
+
 # All parsing of RDF/Atom XML into Feed/FeedInfo/FeedItem objects
 
 def atom_parse( root , feed ):
-  for elem in each( root, "entry"):
+  for elem in each( root, "entry" ):
     title = text( find(elem, "title"))
     link = attr( find(elem, "link"), "href")
     feed.add_item( FeedItem(title, link, title, None, False ) )
@@ -163,75 +243,7 @@ def load_feed(feed):
 
 
 
-# Sqlite database functions
 
-def table_missing( cur, table_name ):
-  cur.execute("select * from sqlite_master where type=? and name=?", ( 'table', table_name))
-  return cur.fetchone() == None
-
-def setup_db( con, **tables ):
-  cur = con.cursor()
-  missing = [ddl for (table,ddl) in tables.items() if table_missing(cur, table)]
-  for ddl in missing:
-    cur.execute(ddl)
-  con.commit()
-
-
-def load_feed_items(con,f):
-  for (id, title, link, desc, is_read) in con.execute( "select id, title, link, desc, read from rss_item where feed_id=?", (f.id,) ):
-    fi = FeedItem( title, link,desc, id, is_read )
-    f.add_item( fi )
-
-
-def load_feed_config( con ):
-  result = FeedConfig()
-  sql = "select id, name, url, desc, show_unread, last_updated, etag from rss_feed"
-  for (id, name, url, desc, show_unread, last_updated, etag) in con.execute(sql):
-    f = Feed(name, url, desc=desc, last_updated=last_updated, etag=etag, id=id, show_unread=show_unread)
-    result.add_feed( f )
-    load_feed_items( con, f )
-  return result
-
-
-def save_feed_item( feed, item, con ):
-  """ Feed Items don't change, so just insert if necessary """
-  cur = con.cursor()
-  if not item.id:
-    title = item.title if item.title else "None"
-    link = item.link if item.link else "#"
-    desc = item.desc or title 
-    cur.execute("insert into rss_item(feed_id, title, link, desc) values (?, ?, ?, ? );", (feed.id, title, link, desc ))
-    item.id = cur.lastrowid
-  else:
-    val = "true" if item.read else "false"
-    cur.execute("update rss_item set read=? where id = ?", (val , item.id))
-  con.commit()
-
-def save_feed( feed, con ):
-    """ Save a Feed to the database, or update if any items changed """
-    now = datetime.now()
-    tstamp = now.strftime("%Y-%m-%d %H:%M:%S %Z")
-    cur = con.cursor()  
-    if feed.id:
-      cur.execute("update rss_feed set last_updated=?, etag=? where id=?", (feed.last_updated, feed.etag, feed.id))
-    else:
-      cur.execute("insert into rss_feed(name, url, desc, last_updated, etag) values(?, ?, ?, ?, ?)",
-        (feed.name, feed.url, feed.desc, str(feed.last_updated), feed.etag ) )
-      feed.id = cur.lastrowid  
-    con.commit()
-    for it in feed.items:
-      save_feed_item( feed, it, con )
-    for it in feed.logs:
-      cur.execute("insert into rss_log( feed_id, status, text, tstamp) values( ?, 'INFO', ?, ?)", (feed.id, it, tstamp))
-    feed.logs= []
-    if feed.xml:
-      cur.execute("insert into rss_xml( feed_id, xml, tstamp) values (?,?,?)", (feed.id, feed.xml, tstamp))
-      feed.xml = None
-    con.commit()
-
-def save_feed_config( feed_config, con ):
-  for feed in feed_config.feeds:
-    save_feed( feed, con )
 
 #  for importing RSS Feed info from Digg XML Export
 def parse_digg_config(loc):
@@ -251,16 +263,8 @@ def parse_digg_config(loc):
 
 
 if __name__ == "__main__":
-  db = sqlite3.connect('feed.db')
-
-  setup_db( db, 
-    rss_feed= "create table rss_feed(id integer primary key asc, name, url, desc, show_unread, last_updated, etag);", 
-    rss_xml="create table rss_xml(feed_id integer, xml, tstamp);" ,
-    rss_item= "create table rss_item(id integer primary key asc, feed_id, title, link, desc, read );",
-    rss_log=  "CREATE TABLE rss_log(id integer primary key asc, feed_id, tstamp, status, text);"
-    )
-
-  feed_config = load_feed_config( db )
+  fdb = FeedDB('feed.db')
+  feed_config = fdb.load_feed_config()
 
   cmd = sys.argv[1].lower() if len(sys.argv)>1 else ''
 
@@ -272,13 +276,13 @@ if __name__ == "__main__":
   if cmd=="import":
     if exists( "digg.xml") and isfile("digg.xml"):
       digg = parse_digg_config("d:/proj/rss/digg.xml")
-      save_feed_config( digg, db )
+      fdb.save_feed_config( digg )
     
   if cmd=='refresh':
     for f in feed_config.feeds:
-      load_feed(f)
+      fdb.load_feed(f)
       for it in f.logs: 
         print("{0}:{1}".format( f.name, it) )
-      save_feed(f, db)
+      fdb.save_feed(f)
 
 
