@@ -18,7 +18,10 @@
           methods: {
             markItem:function(event){
               //event.preventDefault()
-              this.$parent.markItem( this.id )
+              this.$parent.markItem( this.id, true )
+            },
+            markUnread:function(event){
+              this.$parent.markItem( this.id, false );
             }
           },
           computed: {
@@ -58,17 +61,16 @@
                   self.feeds = feeds;
                 });
             },
-            markItem: function(id) {
+            markItem: function(id, val = True) {
               var item = null
               for(n in this.itemList) {
                 var t = this.itemList[n]
                 if (t.id==id) item = t;
               }
               if (!item) return;
-              item.read = !item.read;
+              item.read = val;
               jQuery.ajax({url:"@@serverUrl/mark", data:{id:item.id, read:item.read }, method:"POST"}).done(
                 function( d,s,x ){
-                  
                 }
               );
             },
@@ -179,7 +181,9 @@
       <script type='text/x-template' id='rss_item_template'>
           <tr>
               <td style='width:10%'>
-                <span v-show="read" style='font-weight:bold'>Read</span>
+                <span v-show="read" style='font-weight:bold'><a href='#' 
+                    v-bind:class="rss_link_class" v-on:click="markUnread">Read</a>
+                </span>
                 <span v-show="!read" style='font-weight:bold'>Unread</span>
               </td>
               <td style='width:75%;overflow:wrap'>

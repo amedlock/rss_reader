@@ -54,17 +54,24 @@ def to_json_item( feed_id, fi ):
   
 
 class RSSHandler(BaseHTTPRequestHandler):
+
+  def parse_path(self):
+    path = urlparse( self.path ).path
+    result = [x.strip("/") for x in path.split("/")]
+    return [x for x in result if x]
+
+  def parse_params(self):
+    return parse_qs( urlparse(self.path).query)
+
   def do_GET(self):
-    if self.path.startswith("/jquery"):
-      self.get_jquery()
-      return
-    if self.path.startswith("/feed"):
+    path = self.parse_path()
+    if path==["feed"]:
       self.send_response(200)
       self.send_header("Content-type", "text/json; charset=utf-8")
       self.end_headers()
       self.wfile.write( to_json( feed_config ).encode("utf-8") )
       return
-    if self.path.startswith("/items"):
+    if path==["items"]:
       self.send_response(200)      
       self.send_header("Content-type", "text/json; charset=utf-8")
       self.end_headers()      
@@ -92,7 +99,8 @@ class RSSHandler(BaseHTTPRequestHandler):
 
   def do_POST(self):
     args = self.parse_form()
-    if self.path.startswith("/mark"):
+    path = self.parse_path()
+    if path==["mark"]:
       id = int( args.get("id", "0"))
       val = args.get("read", "false")=="true"
       feed_config.mark( id, val )
@@ -100,11 +108,10 @@ class RSSHandler(BaseHTTPRequestHandler):
       self.send_header("Content-type", "text/html; charset=utf-8")
       self.end_headers()
       self.wfile.write(''.encode('utf-8'))
+    if path==["refresh"]:
+      pass # todo
 
 
-  def parse_params(self):
-    return parse_qs( urlparse(self.path).query)
-    #return dict([x.split("=") for x in urlparse(self.path).query.split('&')])
 
   def get_feed(self):
     args = self.parse_params()

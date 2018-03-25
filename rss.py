@@ -193,8 +193,9 @@ def load_feed_config( con ):
   return result
 
 
-def save_feed_item( feed, item, cur ):
+def save_feed_item( feed, item, con ):
   """ Feed Items don't change, so just insert if necessary """
+  cur = con.cursor()
   if not item.id:
     title = item.title if item.title else "None"
     link = item.link if item.link else "#"
@@ -204,7 +205,7 @@ def save_feed_item( feed, item, cur ):
   else:
     val = "true" if item.read else "false"
     cur.execute("update rss_item set read=? where id = ?", (val , item.id))
-  cur.commit()
+  con.commit()
 
 def save_feed( feed, con ):
     """ Save a Feed to the database, or update if any items changed """
@@ -219,7 +220,7 @@ def save_feed( feed, con ):
       feed.id = cur.lastrowid  
     con.commit()
     for it in feed.items:
-      save_feed_item( feed, it, cur )
+      save_feed_item( feed, it, con )
     for it in feed.logs:
       cur.execute("insert into rss_log( feed_id, status, text, tstamp) values( ?, 'INFO', ?, ?)", (feed.id, it, tstamp))
     feed.logs= []
@@ -270,7 +271,6 @@ if __name__ == "__main__":
 
   if cmd=="import":
     if exists( "digg.xml") and isfile("digg.xml"):
-      print("\n**** Feeds in Digg Export ****")
       digg = parse_digg_config("d:/proj/rss/digg.xml")
       save_feed_config( digg, db )
     
